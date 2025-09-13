@@ -38,15 +38,18 @@ SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS + SUBTITLE_EXTENSIONS
 
 # 正则表达式模式，用于从文件名中提取剧名和季数
 # 例如："Invasion.2021.S03E04.1080p.x265-ELiTE"
-SEASON_PATTERN = re.compile(r'[.\s][Ss]([0-9]{1,2})[Ee][0-9]{1,2}[.\s]')
-YEAR_PATTERN = re.compile(r'[.\s](19[0-9]{2}|20[0-9]{2})[.\s]')
+SEASON_PATTERN = re.compile(r'[.\s\(\)\[\]][Ss]([0-9]{1,2})[Ee][0-9]{1,2}[.\s\(\)\[\]]')
+YEAR_PATTERN = re.compile(r'[.\s\(\)\[\]](19[0-9]{2}|20[0-9]{2})[.\s\(\)\[\]]')
 
 # 用于识别电视剧的模式（包含SxxExx格式）
-TV_SHOW_PATTERN = re.compile(r'[.\s][Ss][0-9]{1,2}[Ee][0-9]{1,2}[.\s]')
+TV_SHOW_PATTERN = re.compile(r'[.\s\(\)\[\]][Ss][0-9]{1,2}[Ee][0-9]{1,2}[.\s\(\)\[\]]')
 
 # 用于提取分辨率和编码的模式
-RESOLUTION_PATTERN = re.compile(r'[.\s](\d+p)[.\s]')
-CODEC_PATTERN = re.compile(r'[.\s](x26[45])[.\s-]')
+RESOLUTION_PATTERN = re.compile(r'[.\s\(\)\[\]](\d+p)[.\s\(\)\[\]]')
+CODEC_PATTERN = re.compile(r'[.\s\(\)\[\]](x26[45])[.\s\(\)\[\]-]')
+
+# 用于替换文件名中的分隔符的模式
+SEPARATOR_PATTERN = re.compile(r'[\s\(\)\[\]]')
 
 
 def is_tv_show(filename):
@@ -93,6 +96,24 @@ def match_resolution_and_codec(filename, target_resolution=None, target_codec=No
     return True
 
 
+def normalize_filename(filename):
+    """
+    将文件名中的空格、()、[]等分隔符统一替换为点号(.)
+    
+    Args:
+        filename: 原始文件名
+        
+    Returns:
+        str: 标准化后的文件名
+    """
+    # 替换所有空格、()、[]为点号
+    normalized = SEPARATOR_PATTERN.sub('.', filename)
+    # 处理可能出现的连续点号
+    while '..' in normalized:
+        normalized = normalized.replace('..', '.')
+    return normalized
+
+
 def extract_show_info(filename):
     """
     从文件名中提取剧名和季数
@@ -106,8 +127,11 @@ def extract_show_info(filename):
     # 移除文件扩展名
     basename = os.path.splitext(filename)[0]
     
+    # 标准化文件名（替换空格、()、[]为点号）
+    normalized_basename = normalize_filename(basename)
+    
     # 提取季数
-    season_match = SEASON_PATTERN.search(basename)
+    season_match = SEASON_PATTERN.search(normalized_basename)
     if not season_match:
         logging.warning(f"无法从 {filename} 中提取季数")
         return None, None
@@ -116,14 +140,14 @@ def extract_show_info(filename):
     season_str = f"S{season_num:02d}"
     
     # 提取剧名（假设剧名在年份之前或季数之前）
-    year_match = YEAR_PATTERN.search(basename)
+    year_match = YEAR_PATTERN.search(normalized_basename)
     
     if year_match:
         # 如果有年份，剧名在年份之前
-        show_name_parts = basename[:year_match.start()].split('.')
+        show_name_parts = normalized_basename[:year_match.start()].split('.')
     else:
         # 否则，剧名在季数之前
-        show_name_parts = basename[:season_match.start()].split('.')
+        show_name_parts = normalized_basename[:season_match.start()].split('.')
     
     # 清理剧名
     show_name = ' '.join(show_name_parts).strip()
@@ -173,7 +197,18 @@ def move_file(source_path, target_dir):
         bool: 是否成功移动文件
     """
     filename = os.path.basename(source_path)
-    target_path = os.path.join(target_dir, filename)
+    
+    # 获取文件扩展名
+    _, ext = os.path.splitext(filename)
+    
+    # 标准化文件名（替换空格、()、[]为点号）
+    normalized_filename = normalize_filename(filename)
+    
+    # 保留原始扩展名
+    if normalized_filename.endswith(ext):
+        normalized_filename = normalized_filename[:-len(ext)] + ext
+    
+    target_path = os.path.join(target_dir, normalized_filename)
     
     # 检查目标文件是否已存在
     if os.path.exists(target_path):
