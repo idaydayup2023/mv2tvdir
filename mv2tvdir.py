@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# 版本信息
+__version__ = "1.0.0"
+
 """
 mv2tvdir - 将电视剧文件移动到按剧名/季级组织的目录结构中
 
@@ -293,6 +296,7 @@ def main():
     parser.add_argument('target_dir', help='目标目录')
     parser.add_argument('--resolution', help='只处理指定分辨率的文件 (例如: 1080p, 720p)')
     parser.add_argument('--codec', help='只处理指定编码的文件 (例如: x265, x264)')
+    parser.add_argument('--version', action='version', version=f'mv2tvdir {__version__}')
     
     args = parser.parse_args()
     
@@ -317,7 +321,7 @@ def main():
     if codec:
         filter_info += f", 编码 = {codec}"
     
-    logging.info(f"开始处理: 源目录 = {source_dir}, 目标目录 = {target_dir}{filter_info}")
+    logging.info(f"mv2tvdir v{__version__} - 开始处理: 源目录 = {source_dir}, 目标目录 = {target_dir}{filter_info}")
     
     # 处理目录
     success_count, failure_count, skipped_count = process_directory(source_dir, target_dir, resolution, codec)
