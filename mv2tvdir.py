@@ -170,8 +170,11 @@ def create_target_directory(base_dir, show_name, season):
     Returns:
         str: 创建的目标目录路径
     """
+    # 标准化剧名（将空格替换为点号）
+    normalized_show_name = normalize_filename(show_name)
+    
     # 创建剧名目录
-    show_dir = os.path.join(base_dir, show_name)
+    show_dir = os.path.join(base_dir, normalized_show_name)
     if not os.path.exists(show_dir):
         os.makedirs(show_dir)
         logging.info(f"创建剧名目录: {show_dir}")
@@ -272,6 +275,7 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None):
             
             # 创建目标目录
             target_dir = create_target_directory(target_base_dir, show_name, season)
+            logging.info(f"目标目录: {target_dir} (剧名: {show_name}, 季: {season})")
             
             # 移动文件
             if move_file(source_path, target_dir):
