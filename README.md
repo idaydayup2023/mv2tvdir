@@ -1,10 +1,12 @@
 # mv2tvdir
 
-一个Python脚本，用于将电视剧文件（包括视频和字幕）移动到按剧名/季级组织的目录结构中。
+一个Python脚本，用于将电视剧文件（包括视频和字幕）移动到按剧名/季级组织的目录结构中。脚本能够区分电视剧和电影文件，并支持按分辨率和编码过滤文件。
 
 ## 功能
 
 - 扫描源目录下的电视剧文件（支持mkv、mp4、avi视频格式和srt、ass、sub字幕格式）
+- 区分电视剧和电影文件，只处理电视剧文件
+- 支持按分辨率（如1080p、720p）和编码（如x265、x264）过滤文件
 - 从文件名中提取剧名和季数信息
 - 按照"剧名/季级/电视剧"的结构创建目标目录
 - 将文件移动到对应的目标目录
@@ -12,19 +14,40 @@
 ## 使用方法
 
 ```bash
-./mv2tvdir.py <源目录> <目标目录>
+./mv2tvdir.py <源目录> <目标目录> [选项]
 ```
 
 或者
 
 ```bash
-python3 mv2tvdir.py <源目录> <目标目录>
+python3 mv2tvdir.py <源目录> <目标目录> [选项]
 ```
+
+### 选项
+
+- `--resolution=<分辨率>`: 只处理指定分辨率的文件 (例如: 1080p, 720p)
+- `--codec=<编码>`: 只处理指定编码的文件 (例如: x265, x264)
 
 ### 示例
 
+基本用法：
 ```bash
 ./mv2tvdir.py /downloads /media/tv
+```
+
+只处理1080p分辨率的文件：
+```bash
+./mv2tvdir.py /downloads /media/tv --resolution=1080p
+```
+
+只处理x265编码的文件：
+```bash
+./mv2tvdir.py /downloads /media/tv --codec=x265
+```
+
+同时指定分辨率和编码：
+```bash
+./mv2tvdir.py /downloads /media/tv --resolution=1080p --codec=x265
 ```
 
 ## 文件命名格式

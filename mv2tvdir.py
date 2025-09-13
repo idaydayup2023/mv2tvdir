@@ -5,10 +5,17 @@
 mv2tvdir - 将电视剧文件移动到按剧名/季级组织的目录结构中
 
 用法：
-    mv2tvdir.py <源目录> <目标目录>
+    mv2tvdir.py <源目录> <目标目录> [选项]
+
+选项：
+    --resolution=<分辨率>  只处理指定分辨率的文件 (例如: 1080p, 720p)
+    --codec=<编码>        只处理指定编码的文件 (例如: x265, x264)
 
 示例：
     mv2tvdir.py /downloads /media/tv
+    mv2tvdir.py /downloads /media/tv --resolution=1080p
+    mv2tvdir.py /downloads /media/tv --codec=x265
+    mv2tvdir.py /downloads /media/tv --resolution=1080p --codec=x265
 """
 
 import os
@@ -16,6 +23,7 @@ import sys
 import re
 import shutil
 import logging
+import argparse
 
 # 配置日志
 logging.basicConfig(
@@ -32,6 +40,57 @@ SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS + SUBTITLE_EXTENSIONS
 # 例如："Invasion.2021.S03E04.1080p.x265-ELiTE"
 SEASON_PATTERN = re.compile(r'[.\s][Ss]([0-9]{1,2})[Ee][0-9]{1,2}[.\s]')
 YEAR_PATTERN = re.compile(r'[.\s](19[0-9]{2}|20[0-9]{2})[.\s]')
+
+# 用于识别电视剧的模式（包含SxxExx格式）
+TV_SHOW_PATTERN = re.compile(r'[.\s][Ss][0-9]{1,2}[Ee][0-9]{1,2}[.\s]')
+
+# 用于提取分辨率和编码的模式
+RESOLUTION_PATTERN = re.compile(r'[.\s](\d+p)[.\s]')
+CODEC_PATTERN = re.compile(r'[.\s](x26[45])[.\s-]')
+
+
+def is_tv_show(filename):
+    """
+    判断文件是否为电视剧（通过查找SxxExx格式）
+    
+    Args:
+        filename: 文件名
+        
+    Returns:
+        bool: 是否为电视剧
+    """
+    return bool(TV_SHOW_PATTERN.search(filename))
+
+
+def match_resolution_and_codec(filename, target_resolution=None, target_codec=None):
+    """
+    检查文件是否匹配目标分辨率和编码
+    
+    Args:
+        filename: 文件名
+        target_resolution: 目标分辨率 (例如: "1080p")
+        target_codec: 目标编码 (例如: "x265")
+        
+    Returns:
+        bool: 是否匹配目标分辨率和编码
+    """
+    # 如果没有指定分辨率和编码，则匹配所有文件
+    if not target_resolution and not target_codec:
+        return True
+    
+    # 检查分辨率
+    if target_resolution:
+        resolution_match = RESOLUTION_PATTERN.search(filename)
+        if not resolution_match or resolution_match.group(1).lower() != target_resolution.lower():
+            return False
+    
+    # 检查编码
+    if target_codec:
+        codec_match = CODEC_PATTERN.search(filename)
+        if not codec_match or codec_match.group(1).lower() != target_codec.lower():
+            return False
+    
+    return True
 
 
 def extract_show_info(filename):
@@ -130,19 +189,22 @@ def move_file(source_path, target_dir):
         return False
 
 
-def process_directory(source_dir, target_base_dir):
+def process_directory(source_dir, target_base_dir, resolution=None, codec=None):
     """
     处理源目录中的所有文件
     
     Args:
         source_dir: 源目录
         target_base_dir: 目标基础目录
+        resolution: 目标分辨率 (例如: "1080p")
+        codec: 目标编码 (例如: "x265")
         
     Returns:
-        tuple: (成功数, 失败数)
+        tuple: (成功数, 失败数, 跳过数)
     """
     success_count = 0
     failure_count = 0
+    skipped_count = 0
     
     # 遍历源目录中的所有文件
     for root, _, files in os.walk(source_dir):
@@ -150,6 +212,18 @@ def process_directory(source_dir, target_base_dir):
             # 检查文件扩展名是否受支持
             _, ext = os.path.splitext(filename)
             if ext.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            
+            # 检查是否为电视剧
+            if not is_tv_show(filename):
+                logging.info(f"跳过电影文件: {filename}")
+                skipped_count += 1
+                continue
+            
+            # 检查是否匹配目标分辨率和编码
+            if not match_resolution_and_codec(filename, resolution, codec):
+                logging.info(f"跳过不匹配的文件: {filename}")
+                skipped_count += 1
                 continue
             
             source_path = os.path.join(root, filename)
@@ -170,17 +244,23 @@ def process_directory(source_dir, target_base_dir):
             else:
                 failure_count += 1
     
-    return success_count, failure_count
+    return success_count, failure_count, skipped_count
 
 
 def main():
-    # 检查命令行参数
-    if len(sys.argv) != 3:
-        print(f"用法: {sys.argv[0]} <源目录> <目标目录>")
-        sys.exit(1)
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='将电视剧文件移动到按剧名/季级组织的目录结构中')
+    parser.add_argument('source_dir', help='源目录')
+    parser.add_argument('target_dir', help='目标目录')
+    parser.add_argument('--resolution', help='只处理指定分辨率的文件 (例如: 1080p, 720p)')
+    parser.add_argument('--codec', help='只处理指定编码的文件 (例如: x265, x264)')
     
-    source_dir = sys.argv[1]
-    target_dir = sys.argv[2]
+    args = parser.parse_args()
+    
+    source_dir = args.source_dir
+    target_dir = args.target_dir
+    resolution = args.resolution
+    codec = args.codec
     
     # 检查源目录和目标目录是否存在
     if not os.path.isdir(source_dir):
@@ -191,12 +271,19 @@ def main():
         print(f"错误: 目标目录不存在: {target_dir}")
         sys.exit(1)
     
-    logging.info(f"开始处理: 源目录 = {source_dir}, 目标目录 = {target_dir}")
+    # 记录过滤条件
+    filter_info = ""
+    if resolution:
+        filter_info += f", 分辨率 = {resolution}"
+    if codec:
+        filter_info += f", 编码 = {codec}"
+    
+    logging.info(f"开始处理: 源目录 = {source_dir}, 目标目录 = {target_dir}{filter_info}")
     
     # 处理目录
-    success_count, failure_count = process_directory(source_dir, target_dir)
+    success_count, failure_count, skipped_count = process_directory(source_dir, target_dir, resolution, codec)
     
-    logging.info(f"处理完成: 成功 = {success_count}, 失败 = {failure_count}")
+    logging.info(f"处理完成: 成功 = {success_count}, 失败 = {failure_count}, 跳过 = {skipped_count}")
 
 
 if __name__ == "__main__":
