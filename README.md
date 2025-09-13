@@ -93,3 +93,7 @@ python3 mv2tvdir.py <源目录> <目标目录> [选项]
 
 - Python 3.6+
 - 无需额外依赖
+
+## 许可证
+
+本项目采用MIT许可证。详情请参阅[LICENSE](LICENSE)文件。

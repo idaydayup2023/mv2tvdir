@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Copyright (c) 2023-2024 mv2tvdir Contributors
+# 本项目采用MIT许可证 (MIT License)
+# 详情请参阅项目根目录下的LICENSE文件
+
 # 版本信息
 __version__ = "1.0.0"
 
