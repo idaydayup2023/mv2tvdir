@@ -6,7 +6,7 @@
 # 详情请参阅项目根目录下的LICENSE文件
 
 # 版本信息
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 """
 mv2tvdir - 将电视剧文件移动到按剧名/季级组织的目录结构中
@@ -17,12 +17,14 @@ mv2tvdir - 将电视剧文件移动到按剧名/季级组织的目录结构中
 选项：
     --resolution=<分辨率>  只处理指定分辨率的文件 (例如: 1080p, 720p)
     --codec=<编码>        只处理指定编码的文件 (例如: x265, x264)
+    --remove-source       移动文件后删除源目录（如果源目录为空或只剩下nfo、txt、jpg等文件）
 
 示例：
     mv2tvdir.py /downloads /media/tv
     mv2tvdir.py /downloads /media/tv --resolution=1080p
     mv2tvdir.py /downloads /media/tv --codec=x265
     mv2tvdir.py /downloads /media/tv --resolution=1080p --codec=x265
+    mv2tvdir.py /downloads /media/tv --remove-source
 """
 
 import os
@@ -42,6 +44,9 @@ logging.basicConfig(
 VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.avi')
 SUBTITLE_EXTENSIONS = ('.srt', '.ass', '.sub')
 SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS + SUBTITLE_EXTENSIONS
+
+# 不需要删除的文件类型（在源目录中保留的文件类型）
+IGNORED_EXTENSIONS = ('.nfo', '.txt', '.jpg', '.jpeg', '.png', '.gif')
 
 # 正则表达式模式，用于从文件名中提取剧名和季数
 # 例如："Invasion.2021.S03E04.1080p.x265-ELiTE"
@@ -195,6 +200,36 @@ def create_target_directory(base_dir, show_name, season):
     return season_dir
 
 
+def can_remove_directory(directory):
+    """
+    检查目录是否可以删除（为空或只包含被忽略的文件类型）
+    
+    Args:
+        directory: 目录路径
+        
+    Returns:
+        bool: 是否可以删除目录
+    """
+    # 检查目录是否存在
+    if not os.path.exists(directory) or not os.path.isdir(directory):
+        return False
+    
+    # 获取目录中的所有文件
+    files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    
+    # 如果目录为空，可以删除
+    if not files:
+        return True
+    
+    # 检查是否只包含被忽略的文件类型
+    for file in files:
+        _, ext = os.path.splitext(file)
+        if ext.lower() not in IGNORED_EXTENSIONS:
+            return False
+    
+    return True
+
+
 def move_file(source_path, target_dir):
     """
     将文件移动到目标目录
@@ -234,7 +269,7 @@ def move_file(source_path, target_dir):
         return False
 
 
-def process_directory(source_dir, target_base_dir, resolution=None, codec=None):
+def process_directory(source_dir, target_base_dir, resolution=None, codec=None, remove_source=False):
     """
     处理源目录中的所有文件
     
@@ -243,16 +278,21 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None):
         target_base_dir: 目标基础目录
         resolution: 目标分辨率 (例如: "1080p")
         codec: 目标编码 (例如: "x265")
+        remove_source: 是否在处理后删除源目录
         
     Returns:
-        tuple: (成功数, 失败数, 跳过数)
+        tuple: (成功数, 失败数, 跳过数, 删除目录数)
     """
     success_count = 0
     failure_count = 0
     skipped_count = 0
+    removed_dirs_count = 0
+    
+    # 收集处理过的目录，用于后续检查是否可以删除
+    processed_dirs = set()
     
     # 遍历源目录中的所有文件
-    for root, _, files in os.walk(source_dir):
+    for root, _, files in os.walk(source_dir, topdown=False):
         for filename in files:
             # 检查文件扩展名是否受支持
             _, ext = os.path.splitext(filename)
@@ -287,10 +327,26 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None):
             # 移动文件
             if move_file(source_path, target_dir):
                 success_count += 1
+                # 记录处理过的目录
+                processed_dirs.add(os.path.dirname(source_path))
             else:
                 failure_count += 1
     
-    return success_count, failure_count, skipped_count
+    # 如果需要删除源目录
+    if remove_source:
+        # 按照目录深度从深到浅排序，确保先删除子目录
+        sorted_dirs = sorted(processed_dirs, key=lambda x: x.count(os.sep), reverse=True)
+        
+        for dir_path in sorted_dirs:
+            if can_remove_directory(dir_path):
+                try:
+                    shutil.rmtree(dir_path)
+                    logging.info(f"删除源目录: {dir_path}")
+                    removed_dirs_count += 1
+                except Exception as e:
+                    logging.error(f"删除源目录失败: {dir_path}, 错误: {e}")
+    
+    return success_count, failure_count, skipped_count, removed_dirs_count
 
 
 def main():
@@ -300,6 +356,7 @@ def main():
     parser.add_argument('target_dir', help='目标目录')
     parser.add_argument('--resolution', help='只处理指定分辨率的文件 (例如: 1080p, 720p)')
     parser.add_argument('--codec', help='只处理指定编码的文件 (例如: x265, x264)')
+    parser.add_argument('--remove-source', action='store_true', help='移动文件后删除源目录（如果源目录为空或只剩下nfo、txt、jpg等文件）')
     parser.add_argument('--version', action='version', version=f'mv2tvdir {__version__}')
     
     args = parser.parse_args()
@@ -308,6 +365,7 @@ def main():
     target_dir = args.target_dir
     resolution = args.resolution
     codec = args.codec
+    remove_source = args.remove_source
     
     # 检查源目录和目标目录是否存在
     if not os.path.isdir(source_dir):
@@ -324,13 +382,22 @@ def main():
         filter_info += f", 分辨率 = {resolution}"
     if codec:
         filter_info += f", 编码 = {codec}"
+    if remove_source:
+        filter_info += f", 删除源目录 = 是"
     
     logging.info(f"mv2tvdir v{__version__} - 开始处理: 源目录 = {source_dir}, 目标目录 = {target_dir}{filter_info}")
     
     # 处理目录
-    success_count, failure_count, skipped_count = process_directory(source_dir, target_dir, resolution, codec)
+    success_count, failure_count, skipped_count, removed_dirs_count = process_directory(
+        source_dir, target_dir, resolution, codec, remove_source
+    )
     
-    logging.info(f"处理完成: 成功 = {success_count}, 失败 = {failure_count}, 跳过 = {skipped_count}")
+    # 输出处理结果
+    result_info = f"处理完成: 成功 = {success_count}, 失败 = {failure_count}, 跳过 = {skipped_count}"
+    if remove_source:
+        result_info += f", 删除源目录 = {removed_dirs_count}"
+    
+    logging.info(result_info)
 
 
 if __name__ == "__main__":
