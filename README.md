@@ -31,6 +31,7 @@ python3 mv2tvdir.py <源目录> <目标目录> [选项]
 - `--resolution=<分辨率>`: 只处理指定分辨率的文件 (例如: 1080p, 720p)
 - `--codec=<编码>`: 只处理指定编码的文件 (例如: x265, x264)
 - `--remove-source`: 在成功移动所有文件后删除源目录
+- `--force`: 强制处理所有视频文件，忽略AI字幕检查（默认只处理有AI字幕的文件）
 - `--version`: 显示版本信息
 
 ### 示例
@@ -60,6 +61,16 @@ python3 mv2tvdir.py <源目录> <目标目录> [选项]
 ./mv2tvdir.py /downloads /media/tv --remove-source
 ```
 
+强制处理所有视频文件（忽略AI字幕检查）：
+```bash
+./mv2tvdir.py /downloads /media/tv --force
+```
+
+组合使用多个选项（默认启用AI字幕检查）：
+```bash
+./mv2tvdir.py /downloads /media/tv --resolution=1080p --remove-source
+```
+
 ## 文件命名格式
 
 脚本支持的电视剧文件命名格式示例：
@@ -68,6 +79,16 @@ python3 mv2tvdir.py <源目录> <目标目录> [选项]
 - Breaking.Bad.S05E01.720p.HDTV.x264-IMMERSE.mp4
 
 脚本会从文件名中提取剧名和季数，然后将文件移动到相应的目录中。
+
+## AI字幕功能
+
+**默认情况下**，脚本会检查每个视频文件是否存在对应的 `.ai.srt` 字幕文件。只有当视频文件存在对应的AI字幕文件时，该视频文件才会被处理和移动。
+
+例如，对于视频文件 `Breaking.Bad.S01E01.1080p.x265.mkv`，脚本会检查是否存在 `Breaking.Bad.S01E01.1080p.x265.ai.srt` 字幕文件。如果存在，则处理该视频文件；如果不存在，则跳过该文件。
+
+如果您想要处理所有视频文件（无论是否有AI字幕），可以使用 `--force` 选项来忽略AI字幕检查。
+
+这个默认行为特别适用于只想处理已经生成了AI字幕的视频文件的场景。
 
 ## 目录结构
 

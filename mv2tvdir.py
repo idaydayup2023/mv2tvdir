@@ -6,7 +6,7 @@
 # 详情请参阅项目根目录下的LICENSE文件
 
 # 版本信息
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 """
 mv2tvdir - 将电视剧文件移动到按剧名/季级组织的目录结构中
@@ -170,9 +170,49 @@ def extract_show_info(filename):
     return show_name, season_str
 
 
+def has_ai_subtitle(video_file_path):
+    """
+    检查视频文件是否存在对应的.ai.srt字幕文件
+    
+    Args:
+        video_file_path: 视频文件的完整路径
+        
+    Returns:
+        bool: 如果存在对应的.ai.srt字幕文件返回True，否则返回False
+    """
+    # 获取视频文件的目录和文件名（不含扩展名）
+    video_dir = os.path.dirname(video_file_path)
+    video_name = os.path.splitext(os.path.basename(video_file_path))[0]
+    
+    # 构造对应的.ai.srt字幕文件路径
+    ai_subtitle_path = os.path.join(video_dir, f"{video_name}.ai.srt")
+    
+    return os.path.exists(ai_subtitle_path)
+
+
+def check_directory_permissions(directory):
+    """
+    检查目录的读写权限
+    
+    Args:
+        directory: 目录路径
+        
+    Returns:
+        bool: 如果有读写权限返回True，否则返回False
+    """
+    if not os.path.exists(directory):
+        # 检查父目录的写权限
+        parent_dir = os.path.dirname(directory)
+        while parent_dir and not os.path.exists(parent_dir):
+            parent_dir = os.path.dirname(parent_dir)
+        return os.access(parent_dir, os.W_OK) if parent_dir else False
+    
+    return os.access(directory, os.R_OK | os.W_OK)
+
+
 def create_target_directory(base_dir, show_name, season):
     """
-    创建目标目录结构：剧名/季级/
+    创建目标目录结构
     
     Args:
         base_dir: 基础目录
@@ -180,7 +220,7 @@ def create_target_directory(base_dir, show_name, season):
         season: 季数
         
     Returns:
-        str: 创建的目标目录路径
+        str: 创建的目标目录路径，如果创建失败返回None
     """
     # 标准化剧名（将空格替换为点号）
     normalized_show_name = normalize_filename(show_name)
@@ -188,14 +228,28 @@ def create_target_directory(base_dir, show_name, season):
     # 创建剧名目录
     show_dir = os.path.join(base_dir, normalized_show_name)
     if not os.path.exists(show_dir):
-        os.makedirs(show_dir)
-        logging.info(f"创建剧名目录: {show_dir}")
+        try:
+            os.makedirs(show_dir)
+            logging.info(f"创建剧名目录: {show_dir}")
+        except PermissionError:
+            logging.error(f"权限错误: 无法创建剧名目录 {show_dir}")
+            return None
+        except OSError as e:
+            logging.error(f"系统错误: 无法创建剧名目录 {show_dir}: {e}")
+            return None
     
     # 创建季目录
     season_dir = os.path.join(show_dir, season)
     if not os.path.exists(season_dir):
-        os.makedirs(season_dir)
-        logging.info(f"创建季目录: {season_dir}")
+        try:
+            os.makedirs(season_dir)
+            logging.info(f"创建季目录: {season_dir}")
+        except PermissionError:
+            logging.error(f"权限错误: 无法创建季目录 {season_dir}")
+            return None
+        except OSError as e:
+            logging.error(f"系统错误: 无法创建季目录 {season_dir}: {e}")
+            return None
     
     return season_dir
 
@@ -269,7 +323,7 @@ def move_file(source_path, target_dir):
         return False
 
 
-def process_directory(source_dir, target_base_dir, resolution=None, codec=None, remove_source=False):
+def process_directory(source_dir, target_base_dir, resolution=None, codec=None, remove_source=False, require_ai_subtitle=True):
     """
     处理源目录中的所有文件
     
@@ -279,6 +333,7 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None, 
         resolution: 目标分辨率 (例如: "1080p")
         codec: 目标编码 (例如: "x265")
         remove_source: 是否在处理后删除源目录
+        require_ai_subtitle: 是否只处理存在.ai.srt字幕文件的视频
         
     Returns:
         tuple: (成功数, 失败数, 跳过数, 删除目录数)
@@ -313,6 +368,13 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None, 
             
             source_path = os.path.join(root, filename)
             
+            # 如果启用了AI字幕检查，且当前文件是视频文件，检查是否存在对应的.ai.srt字幕文件
+            if require_ai_subtitle and ext.lower() in VIDEO_EXTENSIONS:
+                if not has_ai_subtitle(source_path):
+                    logging.info(f"跳过文件: {filename} (未找到对应的.ai.srt字幕文件)")
+                    skipped_count += 1
+                    continue
+            
             # 提取剧名和季数
             show_name, season = extract_show_info(filename)
             if not show_name or not season:
@@ -322,6 +384,11 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None, 
             
             # 创建目标目录
             target_dir = create_target_directory(target_base_dir, show_name, season)
+            if target_dir is None:
+                logging.error(f"跳过文件: {filename} (无法创建目标目录)")
+                failure_count += 1
+                continue
+                
             logging.info(f"目标目录: {target_dir} (剧名: {show_name}, 季: {season})")
             
             # 移动文件
@@ -357,6 +424,7 @@ def main():
     parser.add_argument('--resolution', help='只处理指定分辨率的文件 (例如: 1080p, 720p)')
     parser.add_argument('--codec', help='只处理指定编码的文件 (例如: x265, x264)')
     parser.add_argument('--remove-source', action='store_true', help='移动文件后删除源目录（如果源目录为空或只剩下nfo、txt、jpg等文件）')
+    parser.add_argument('--force', action='store_true', help='强制处理所有视频文件，忽略AI字幕检查（默认只处理有AI字幕的文件）')
     parser.add_argument('--version', action='version', version=f'mv2tvdir {__version__}')
     
     args = parser.parse_args()
@@ -366,6 +434,7 @@ def main():
     resolution = args.resolution
     codec = args.codec
     remove_source = args.remove_source
+    require_ai_subtitle = not args.force  # 默认启用AI字幕检查，--force时禁用
     
     # 检查源目录和目标目录是否存在
     if not os.path.isdir(source_dir):
@@ -376,6 +445,12 @@ def main():
         print(f"错误: 目标目录不存在: {target_dir}")
         sys.exit(1)
     
+    # 检查目标目录权限
+    if not check_directory_permissions(target_dir):
+        print(f"错误: 目标目录没有写权限: {target_dir}")
+        print("请检查目录权限或使用sudo运行脚本")
+        sys.exit(1)
+    
     # 记录过滤条件
     filter_info = ""
     if resolution:
@@ -384,12 +459,14 @@ def main():
         filter_info += f", 编码 = {codec}"
     if remove_source:
         filter_info += f", 删除源目录 = 是"
+    if require_ai_subtitle:
+        filter_info += f", 需要AI字幕 = 是"
     
     logging.info(f"mv2tvdir v{__version__} - 开始处理: 源目录 = {source_dir}, 目标目录 = {target_dir}{filter_info}")
     
     # 处理目录
     success_count, failure_count, skipped_count, removed_dirs_count = process_directory(
-        source_dir, target_dir, resolution, codec, remove_source
+        source_dir, target_dir, resolution, codec, remove_source, require_ai_subtitle
     )
     
     # 输出处理结果
