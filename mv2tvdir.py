@@ -6,7 +6,7 @@
 # 详情请参阅项目根目录下的LICENSE文件
 
 # 版本信息
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 """
 mv2tvdir - 将电视剧文件移动到按剧名/季级组织的目录结构中
@@ -284,13 +284,14 @@ def can_remove_directory(directory):
     return True
 
 
-def move_file(source_path, target_dir):
+def move_file(source_path, target_dir, override_files=True):
     """
     将文件移动到目标目录
     
     Args:
         source_path: 源文件路径
         target_dir: 目标目录
+        override_files: 是否覆盖已存在的文件，默认为True
         
     Returns:
         bool: 是否成功移动文件
@@ -311,8 +312,11 @@ def move_file(source_path, target_dir):
     
     # 检查目标文件是否已存在
     if os.path.exists(target_path):
-        logging.warning(f"目标文件已存在: {target_path}")
-        return False
+        if not override_files:
+            logging.warning(f"目标文件已存在，跳过: {target_path}")
+            return False
+        else:
+            logging.info(f"目标文件已存在，将覆盖: {target_path}")
     
     try:
         shutil.move(source_path, target_path)
@@ -323,7 +327,7 @@ def move_file(source_path, target_dir):
         return False
 
 
-def process_directory(source_dir, target_base_dir, resolution=None, codec=None, remove_source=False, require_ai_subtitle=True):
+def process_directory(source_dir, target_base_dir, resolution=None, codec=None, remove_source=False, require_ai_subtitle=True, override_files=True):
     """
     处理源目录中的所有文件
     
@@ -334,6 +338,7 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None, 
         codec: 目标编码 (例如: "x265")
         remove_source: 是否在处理后删除源目录
         require_ai_subtitle: 是否只处理存在.ai.srt字幕文件的视频
+        override_files: 是否覆盖已存在的文件，默认为True
         
     Returns:
         tuple: (成功数, 失败数, 跳过数, 删除目录数)
@@ -345,13 +350,15 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None, 
     
     # 收集处理过的目录，用于后续检查是否可以删除
     processed_dirs = set()
+    # 记录成功移动的视频文件，用于后续移动对应的字幕文件
+    moved_videos = {}  # {video_basename_without_ext: (target_dir, source_dir)}
     
-    # 遍历源目录中的所有文件
+    # 第一阶段：处理视频文件
     for root, _, files in os.walk(source_dir, topdown=False):
         for filename in files:
-            # 检查文件扩展名是否受支持
+            # 检查文件扩展名是否为视频文件
             _, ext = os.path.splitext(filename)
-            if ext.lower() not in SUPPORTED_EXTENSIONS:
+            if ext.lower() not in VIDEO_EXTENSIONS:
                 continue
             
             # 检查是否为电视剧
@@ -368,8 +375,8 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None, 
             
             source_path = os.path.join(root, filename)
             
-            # 如果启用了AI字幕检查，且当前文件是视频文件，检查是否存在对应的.ai.srt字幕文件
-            if require_ai_subtitle and ext.lower() in VIDEO_EXTENSIONS:
+            # 如果启用了AI字幕检查，检查是否存在对应的.ai.srt字幕文件
+            if require_ai_subtitle:
                 if not has_ai_subtitle(source_path):
                     logging.info(f"跳过文件: {filename} (未找到对应的.ai.srt字幕文件)")
                     skipped_count += 1
@@ -391,11 +398,61 @@ def process_directory(source_dir, target_base_dir, resolution=None, codec=None, 
                 
             logging.info(f"目标目录: {target_dir} (剧名: {show_name}, 季: {season})")
             
-            # 移动文件
-            if move_file(source_path, target_dir):
+            # 移动视频文件
+            if move_file(source_path, target_dir, override_files):
                 success_count += 1
                 # 记录处理过的目录
                 processed_dirs.add(os.path.dirname(source_path))
+                # 记录成功移动的视频文件，用于后续移动字幕文件
+                video_basename = os.path.splitext(filename)[0]
+                moved_videos[video_basename] = (target_dir, root)
+                logging.info(f"成功移动视频文件: {filename}")
+            else:
+                failure_count += 1
+    
+    # 第二阶段：处理字幕文件，只移动对应视频文件已成功移动的字幕文件
+    for root, _, files in os.walk(source_dir, topdown=False):
+        for filename in files:
+            # 检查文件扩展名是否为字幕文件
+            _, ext = os.path.splitext(filename)
+            if ext.lower() not in SUBTITLE_EXTENSIONS:
+                continue
+            
+            # 检查是否为电视剧
+            if not is_tv_show(filename):
+                logging.info(f"跳过电影字幕文件: {filename}")
+                skipped_count += 1
+                continue
+            
+            # 检查是否匹配目标分辨率和编码
+            if not match_resolution_and_codec(filename, resolution, codec):
+                logging.info(f"跳过不匹配的字幕文件: {filename}")
+                skipped_count += 1
+                continue
+            
+            source_path = os.path.join(root, filename)
+            subtitle_basename = os.path.splitext(filename)[0]
+            
+            # 查找对应的视频文件是否已被移动
+            corresponding_video = None
+            for video_basename, (target_dir, video_root) in moved_videos.items():
+                if video_root == root and subtitle_basename.startswith(video_basename):
+                    corresponding_video = (target_dir, video_basename)
+                    break
+            
+            if corresponding_video is None:
+                logging.info(f"跳过字幕文件: {filename} (对应的视频文件未被移动)")
+                skipped_count += 1
+                continue
+            
+            target_dir, video_basename = corresponding_video
+            
+            # 移动字幕文件
+            if move_file(source_path, target_dir, override_files):
+                success_count += 1
+                # 记录处理过的目录
+                processed_dirs.add(os.path.dirname(source_path))
+                logging.info(f"成功移动字幕文件: {filename} (对应视频: {video_basename})")
             else:
                 failure_count += 1
     
@@ -425,6 +482,7 @@ def main():
     parser.add_argument('--codec', help='只处理指定编码的文件 (例如: x265, x264)')
     parser.add_argument('--remove-source', action='store_true', help='移动文件后删除源目录（如果源目录为空或只剩下nfo、txt、jpg等文件）')
     parser.add_argument('--force', action='store_true', help='强制处理所有视频文件，忽略AI字幕检查（默认只处理有AI字幕的文件）')
+    parser.add_argument('--no-override', action='store_true', help='不覆盖已存在的目标文件（默认覆盖已存在的文件）')
     parser.add_argument('--version', action='version', version=f'mv2tvdir {__version__}')
     
     args = parser.parse_args()
@@ -435,6 +493,7 @@ def main():
     codec = args.codec
     remove_source = args.remove_source
     require_ai_subtitle = not args.force  # 默认启用AI字幕检查，--force时禁用
+    override_files = not args.no_override  # 默认覆盖文件，--no-override时不覆盖
     
     # 检查源目录和目标目录是否存在
     if not os.path.isdir(source_dir):
@@ -461,12 +520,14 @@ def main():
         filter_info += f", 删除源目录 = 是"
     if require_ai_subtitle:
         filter_info += f", 需要AI字幕 = 是"
+    if not override_files:
+        filter_info += f", 覆盖文件 = 否"
     
     logging.info(f"mv2tvdir v{__version__} - 开始处理: 源目录 = {source_dir}, 目标目录 = {target_dir}{filter_info}")
     
     # 处理目录
     success_count, failure_count, skipped_count, removed_dirs_count = process_directory(
-        source_dir, target_dir, resolution, codec, remove_source, require_ai_subtitle
+        source_dir, target_dir, resolution, codec, remove_source, require_ai_subtitle, override_files
     )
     
     # 输出处理结果
